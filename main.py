@@ -7,11 +7,12 @@ class ARKMAutoTrade:
         # โหลดค่าคอนฟิกจาก .env
         load_dotenv()
         self.api_key = os.getenv("API_KEY")
+        self.api_secret = os.getenv("API_SECRET")
         self.base_url = os.getenv("API_BASE_URL")
         self.default_price = float(os.getenv("DEFAULT_ITEM_PRICE", 100.0))
         
-        if not self.api_key:
-            raise ValueError("API_KEY is missing in the environment configuration.")
+        if not self.api_key or not self.api_secret:
+            raise ValueError("API_KEY or API_SECRET is missing in the environment configuration.")
 
     def get_items(self):
         """ดึงรายการสินค้าจาก ARKM"""
