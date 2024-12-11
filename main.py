@@ -7,7 +7,7 @@ class ARKMAutoTrade:
         load_dotenv()
         self.api_key = os.getenv("API_KEY")
         self.api_secret = os.getenv("API_SECRET")
-        self.base_url = "https://arkm.com/api/v1"  # ใส่ URL ของ API ที่ถูกต้อง
+        self.base_url = "https://arkm.com/api"
 
         if not self.api_key or not self.api_secret:
             raise ValueError("API_KEY or API_SECRET is missing")
