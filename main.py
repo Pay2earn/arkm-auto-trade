@@ -1,18 +1,25 @@
 import time
+import random
 import hmac
 import hashlib
 import base64
+import requests
+import json
+import uuid
 import logging
+import math
 import os
 from dotenv import load_dotenv
 
-# โหลดค่าจากไฟล์ .env
+# โหลดตัวแปรจากไฟล์ .env
 load_dotenv()
 
-# กำหนดค่าที่ดึงจาก .env
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+
+# ดึง API_KEY และ API_SECRET จาก .env
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-BASE_URL = "https://arkm.com/api"  # ไม่ต้องดึงจาก .env
+BASE_URL = "https://arkm.com/api"
 SYMBOL = "ETH_USDT"
 TRADE_AMOUNT = 0.02
 
@@ -27,9 +34,6 @@ total_profit = 0
 total_loss = 0
 total_volume = 0
 
-# กำหนดการตั้งค่าของ logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
 def generate_signature(api_key, api_secret, method, path, body=""):
     expiry = (int(time.time()) + 300) * 1000000
     message = f"{api_key}{expiry}{method}{path}{body}"
@@ -43,5 +47,3 @@ def generate_signature(api_key, api_secret, method, path, body=""):
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-
-# ตอนนี้โค้ดจะใช้ค่า API_KEY และ API_SECRET ที่เก็บไว้ใน .env ได้
