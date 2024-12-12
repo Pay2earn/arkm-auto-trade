@@ -23,6 +23,12 @@ PROFIT_TARGET = 0.0004  # 0.03% profit target
 LOSS_CUTOFF = 0.001    # 0.1% stop-loss cutoff
 WAIT_TIME = 60         # Wait time in seconds if no sell occurs
 
+# ตรวจสอบค่าที่ดึงมาจาก .env
+if API_KEY is None or API_SECRET is None:
+    logging.error("Error: API_KEY or API_SECRET is not set in the .env file")
+else:
+    logging.info("Successfully loaded API_KEY and API_SECRET from .env")
+
 # Statistics tracking
 wins = 0
 losses = 0
