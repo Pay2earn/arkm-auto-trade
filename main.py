@@ -1,28 +1,23 @@
-import os
 import time
-import random
 import hmac
 import hashlib
 import base64
-import requests
-import json
-import uuid
 import logging
-import math
+import os
 from dotenv import load_dotenv
 
-# โหลดตัวแปรจากไฟล์ .env
+# โหลดค่าจากไฟล์ .env
 load_dotenv()
 
-# กำหนดตัวแปรจาก .env
+# กำหนดค่าที่ดึงจาก .env
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-BASE_URL = os.getenv("BASE_URL")
+BASE_URL = "https://arkm.com/api"  # ไม่ต้องดึงจาก .env
 SYMBOL = "ETH_USDT"
 TRADE_AMOUNT = 0.02
 
 PROFIT_TARGET = 0.0004  # 0.03% profit target
-LOSS_CUTOFF = 0.001      # 0.1% stop-loss cutoff
+LOSS_CUTOFF = 0.001    # 0.1% stop-loss cutoff
 WAIT_TIME = 60         # Wait time in seconds if no sell occurs
 
 # Statistics tracking
@@ -32,6 +27,7 @@ total_profit = 0
 total_loss = 0
 total_volume = 0
 
+# กำหนดการตั้งค่าของ logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 def generate_signature(api_key, api_secret, method, path, body=""):
@@ -48,16 +44,4 @@ def generate_signature(api_key, api_secret, method, path, body=""):
         "Accept": "application/json"
     }
 
-# ตัวอย่างการเรียกใช้ signature
-method = "GET"
-path = "/account/balance"
-body = ""
-headers = generate_signature(API_KEY, API_SECRET, method, path, body)
-
-# ตัวอย่างการทำ API request
-url = BASE_URL + path
-response = requests.get(url, headers=headers)
-if response.status_code == 200:
-    print(response.json())
-else:
-    logging.error(f"Error: {response.status_code} - {response.text}")
+# ตอนนี้โค้ดจะใช้ค่า API_KEY และ API_SECRET ที่เก็บไว้ใน .env ได้
