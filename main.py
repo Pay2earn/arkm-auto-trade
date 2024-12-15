@@ -1,46 +1,33 @@
 import time
-import random
 import hmac
 import hashlib
 import base64
 import requests
 import json
-import uuid
 import logging
-import math
-from dotenv import load_dotenv  # เพิ่มการใช้งาน dotenv
+from dotenv import load_dotenv
 import os
-
-# ตั้งค่า logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # โหลดค่าจากไฟล์ .env
 load_dotenv()
 
-# ดึงค่า API Key และ API Secret จาก .env
+# อ่าน API_KEY และ API_SECRET จากไฟล์ .env
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-BASE_URL = os.getenv("BASE_URL", "https://arkm.com/api")  # กำหนด URL พื้นฐานจาก .env ถ้าไม่มีจะใช้ค่า default
-SYMBOL = "ETH_USDT"
+
+BASE_URL = "https://arkm.com/api"
+SYMBOL = "ETH_USDT"  # เปลี่ยนคู่เทรดที่ต้องการ เช่น ETH_USDT, ETH_BTC
 TRADE_AMOUNT = 0.02
+PROFIT_TARGET = 1.01  # Sell when price reaches 1% higher than the buy price
+WAIT_TIME = 10  # Force sell if waiting for this long in seconds
 
-PROFIT_TARGET = 0.0004  # 0.03% profit target
-LOSS_CUTOFF = 0.001    # 0.1% stop-loss cutoff
-WAIT_TIME = 60         # Wait time in seconds if no sell occurs
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-# ตัวแปรสำหรับติดตามสถิติ
-wins = 0
-losses = 0
-total_profit = 0
-total_loss = 0
-total_volume = 0
-
-# ฟังก์ชันสำหรับสร้าง signature
 def generate_signature(api_key, api_secret, method, path, body=""):
-    expiry = (int(time.time()) + 300) * 1000000  # ตั้งเวลา expiration 5 นาที
+    expiry = (int(time.time()) + 300) * 1000000
     message = f"{api_key}{expiry}{method}{path}{body}"
     decoded_secret = base64.b64decode(api_secret)
-    signature = hmac.new(decoded_secret, message.encode(), hashlib.sha256).digest()  # แก้ไขที่นี่
+    signature = hmac.new(decoded_secret, message.encode(), hashlib.sha256).digest()
     signature_base64 = base64.b64encode(signature).decode()
     return {
         "Arkham-Api-Key": api_key,
@@ -50,81 +37,98 @@ def generate_signature(api_key, api_secret, method, path, body=""):
         "Accept": "application/json"
     }
 
-# ฟังก์ชันหลักในการทำการซื้อและขาย
-def trade():
-    # ตัวอย่างการซื้อและขาย
-    logging.info("Starting trade process...")
+def fetch_price(symbol):
+    # เปลี่ยนเป็นการดึงข้อมูลราคาจาก path ตามคู่เทรดที่กำหนด
+    path = f"/trade/{symbol}"  # ใช้ f-string แทนค่า symbol เช่น ETH_USDT
+    headers = generate_signature(API_KEY, API_SECRET, 'GET', path)
+    url = BASE_URL + path  # รวม URL base กับ path
+    response = requests.get(url, headers=headers)  # ส่งคำขอ GET ไปยัง API
+    data = response.json()  # แปลงข้อมูลที่ได้จาก API เป็น JSON
+    if response.status_code == 200:
+        return float(data['data']['last_price'])  # คืนค่าราคาล่าสุดจากข้อมูล JSON
+    else:
+        logging.error(f"Error fetching price for {symbol}: {data}")
+        return None
 
-    # คำขอซื้อ
-    path = f"/v1/order"
+def buy(symbol, amount):
+    # Send buy request (adjust as necessary for your API's endpoint and parameters)
+    path = "/orders"
     body = {
-        "symbol": SYMBOL,
-        "amount": TRADE_AMOUNT,
+        "symbol": symbol,
+        "amount": amount,
         "side": "buy",
-        "price": fetch_price(SYMBOL)
+        "price": fetch_price(symbol)
     }
     headers = generate_signature(API_KEY, API_SECRET, 'POST', path, json.dumps(body))
     url = BASE_URL + path
     response = requests.post(url, headers=headers, data=json.dumps(body))
-    if response.status_code == 200:
-        logging.info(f"Successfully bought {TRADE_AMOUNT} {SYMBOL}.")
+    data = response.json()
+    if response.status_code == 200 and data.get('status') == 'success':
+        logging.info(f"Bought {amount} {symbol} successfully at price {body['price']}")
+        return body['price']  # Return the buy price for further calculations
     else:
-        logging.error(f"Error in buying: {response.json()}")
-
-    # ตรวจสอบราคาและขาย
-    current_price = fetch_price(SYMBOL)
-    if current_price:
-        buy_price = current_price
-        logging.info(f"Buy price: {buy_price}")
-        start_time = time.time()
-
-        while True:
-            current_price = fetch_price(SYMBOL)
-            if current_price >= buy_price * (1 + PROFIT_TARGET):  # หากราคาเพิ่มขึ้นตามเป้าหมาย
-                logging.info(f"Price reached target, selling at {current_price}")
-                # คำขอขาย
-                body = {
-                    "symbol": SYMBOL,
-                    "amount": TRADE_AMOUNT,
-                    "side": "sell",
-                    "price": current_price
-                }
-                response = requests.post(url, headers=headers, data=json.dumps(body))
-                if response.status_code == 200:
-                    logging.info(f"Successfully sold {TRADE_AMOUNT} {SYMBOL} at {current_price}.")
-                    break
-                else:
-                    logging.error(f"Error in selling: {response.json()}")
-                    break
-            elif time.time() - start_time > WAIT_TIME:  # ถ้ารอเกินเวลาที่กำหนด
-                logging.info("Force selling after waiting for too long.")
-                body = {
-                    "symbol": SYMBOL,
-                    "amount": TRADE_AMOUNT,
-                    "side": "sell",
-                    "price": current_price
-                }
-                response = requests.post(url, headers=headers, data=json.dumps(body))
-                if response.status_code == 200:
-                    logging.info(f"Successfully sold {TRADE_AMOUNT} {SYMBOL} at {current_price}.")
-                    break
-                else:
-                    logging.error(f"Error in selling: {response.json()}")
-                    break
-            time.sleep(1)
-
-# ฟังก์ชันสำหรับดึงราคา
-def fetch_price(symbol):
-    path = f"/v1/market/{symbol}"
-    headers = generate_signature(API_KEY, API_SECRET, 'GET', path)
-    url = BASE_URL + path
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        data = response.json()
-        return data['data']['last_price']  # ดึงราคาล่าสุด
-    else:
-        logging.error(f"Error fetching price for {symbol}: {response.json()}")
+        logging.error(f"Error placing buy order: {data}")
         return None
 
+def sell(symbol, amount, buy_price):
+    # Sell the asset when the price has increased by 1% or after 10 seconds
+    current_price = fetch_price(symbol)
+    if current_price and current_price >= buy_price * PROFIT_TARGET:
+        path = "/orders"
+        body = {
+            "symbol": symbol,
+            "amount": amount,
+            "side": "sell",
+            "price": current_price
+        }
+        headers = generate_signature(API_KEY, API_SECRET, 'POST', path, json.dumps(body))
+        url = BASE_URL + path
+        response = requests.post(url, headers=headers, data=json.dumps(body))
+        data = response.json()
+        if response.status_code == 200 and data.get('status') == 'success':
+            logging.info(f"Sold {amount} {symbol} successfully at price {current_price}")
+            return True
+        else:
+            logging.error(f"Error placing sell order: {data}")
+            return False
+    else:
+        logging.info(f"Waiting for price to reach {buy_price * PROFIT_TARGET}, current price is {current_price}")
+        return False
+
+def auto_trade():
+    balance = 1  # Set an initial balance (for example, you can fetch the actual balance from the API)
+    initial_price = fetch_price(SYMBOL)
+
+    while balance > 0:
+        current_price = fetch_price(SYMBOL)
+        if current_price is None:
+            continue
+
+        logging.info(f"Current price: {current_price}")
+
+        # If the price is lower than the initial price, attempt to buy
+        if current_price < initial_price:
+            logging.info(f"Price {current_price} is lower than initial price {initial_price}. Trying to buy.")
+            buy_price = buy(SYMBOL, TRADE_AMOUNT)
+            if buy_price:
+                # Wait for the price to reach the target
+                start_time = time.time()
+                while time.time() - start_time < WAIT_TIME:
+                    if sell(SYMBOL, TRADE_AMOUNT, buy_price):
+                        balance -= TRADE_AMOUNT
+                        initial_price = fetch_price(SYMBOL)
+                        break
+                    time.sleep(1)
+                else:
+                    logging.info(f"Force selling {SYMBOL} after waiting for {WAIT_TIME} seconds.")
+                    sell(SYMBOL, TRADE_AMOUNT, buy_price)
+                    balance -= TRADE_AMOUNT
+                    initial_price = fetch_price(SYMBOL)
+        else:
+            logging.info(f"Price {current_price} is not lower than initial price. Waiting for better conditions.")
+            time.sleep(5)  # Sleep before checking the price again
+
+        time.sleep(1)  # Sleep before the next loop iteration
+
 if __name__ == "__main__":
-    trade()
+    auto_trade()
