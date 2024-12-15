@@ -7,26 +7,28 @@ import os
 from dotenv import load_dotenv
 import logging
 
-# Load environment variables
+# โหลด environment variables จาก .env
 load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 BASE_URL = "https://arkm.com/api"
 SYMBOL = "ETH_USDT"
-THRESHOLD_PRICE = 3500  # Example threshold
+THRESHOLD_PRICE = 3500  # ราคาที่ตั้งไว้เพื่อซื้อ
 TRADE_AMOUNT = 0.02
-PROFIT_TARGET = 1.01  # 1% profit
-MAX_WAIT = 120         # Maximum wait time in seconds for sell
+PROFIT_TARGET = 1.01  # เป้าหมายกำไร 1%
+MAX_WAIT = 120         # เวลารอสูงสุดสำหรับการขาย
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 def generate_signature(api_key, api_secret, method, path, body=""):
-    expiry = (int(time.time()) + 300) * 1000000
+    """ฟังก์ชันในการสร้างลายเซ็นต์ HMAC"""
+    expiry = (int(time.time()) + 300) * 1000000  # กำหนดเวลาหมดอายุ 5 นาที
     message = f"{api_key}{expiry}{method}{path}{body}"
     decoded_secret = base64.b64decode(api_secret)
     signature = hmac.new(decoded_secret, message.encode(), hashlib.sha256).digest()
     signature_base64 = base64.b64encode(signature).decode()
+    
     return {
         "Arkham-Api-Key": api_key,
         "Arkham-Expires": str(expiry),
@@ -35,95 +37,127 @@ def generate_signature(api_key, api_secret, method, path, body=""):
         "Accept": "application/json"
     }
 
-def fetch_market_data(symbol):
-    """Fetch market data for a specific symbol."""
-    path = f"/market_data/{symbol}"
-    headers = generate_signature(API_KEY, API_SECRET, "GET", path)
-    url = f"{BASE_URL}{path}"
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logging.error(f"Failed to fetch market data: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logging.error(f"Error fetching market data: {e}")
+def login():
+    """ฟังก์ชันสำหรับการล็อกอินเข้าสู่ระบบ ARMK API"""
+    path = "/login"
+    method = "GET"
+    body = ""
+    headers = generate_signature(API_KEY, API_SECRET, method, path, body)
+    
+    response = requests.get(BASE_URL + path, headers=headers)
+    if response.status_code == 200:
+        logging.info("Login successful")
+        return True
+    else:
+        logging.error(f"Login failed: {response.status_code}")
+        return False
+
+def fetch_price(symbol):
+    """ฟังก์ชันดึงราคาปัจจุบันของคู่เหรียญ"""
+    path = f"/market/{symbol}"
+    method = "GET"
+    body = ""
+    headers = generate_signature(API_KEY, API_SECRET, method, path, body)
+    
+    response = requests.get(BASE_URL + path, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        return float(data['price'])
+    else:
+        logging.error(f"Error fetching price for {symbol}: {response.status_code}")
         return None
 
-def execute_order(order_type, symbol, amount):
-    """Execute buy or sell order."""
-    path = f"/orders"
-    body = {
-        "type": order_type,
+def place_order(symbol, side, price, quantity):
+    """ฟังก์ชันสำหรับการวางคำสั่งซื้อหรือขาย"""
+    path = "/order"
+    method = "POST"
+    body = json.dumps({
         "symbol": symbol,
-        "amount": amount
-    }
-    headers = generate_signature(API_KEY, API_SECRET, "POST", path, str(body))
-    url = f"{BASE_URL}{path}"
-    try:
-        response = requests.post(url, headers=headers, json=body)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logging.error(f"Order execution failed: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logging.error(f"Error executing order: {e}")
+        "side": side,  # 'buy' หรือ 'sell'
+        "price": price,
+        "quantity": quantity
+    })
+    headers = generate_signature(API_KEY, API_SECRET, method, path, body)
+    
+    response = requests.post(BASE_URL + path, data=body, headers=headers)
+    if response.status_code == 200:
+        logging.info(f"Order placed: {response.json()}")
+        return response.json()
+    else:
+        logging.error(f"Error placing order: {response.status_code}")
         return None
 
-def auto_trade():
-    """Run the trading bot."""
-    balance = 1000  # Initial balance for trading
-    while balance > 0:
-        market_data = fetch_market_data(SYMBOL)
-        if not market_data:
-            logging.error("Failed to fetch market data, retrying...")
-            time.sleep(5)
+def get_balance():
+    """ฟังก์ชันดึงยอดคงเหลือในบัญชี"""
+    path = "/balance"
+    method = "GET"
+    body = ""
+    headers = generate_signature(API_KEY, API_SECRET, method, path, body)
+    
+    response = requests.get(BASE_URL + path, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        return data['balance']
+    else:
+        logging.error(f"Error fetching balance: {response.status_code}")
+        return 0
+
+def trade(symbol, threshold, max_wait_time=10):
+    """ฟังก์ชันหลักในการเทรด"""
+    while True:
+        balance = get_balance()
+        if balance <= 0:
+            logging.info("Balance is zero, stopping trading.")
+            break
+
+        # ดึงราคาปัจจุบัน
+        current_price = fetch_price(symbol)
+        if current_price is None:
             continue
 
-        current_price = market_data.get("price")
-        logging.info(f"Current price of {SYMBOL}: {current_price}")
+        logging.info(f"Current price of {symbol}: {current_price}")
 
-        # Buy condition
-        if current_price <= THRESHOLD_PRICE:
-            logging.info(f"Buying {SYMBOL} at {current_price}")
-            buy_order = execute_order("buy", SYMBOL, TRADE_AMOUNT)
-            if not buy_order:
-                logging.error("Buy order failed.")
-                continue
+        if current_price < threshold:
+            # ถ้าราคาต่ำกว่าราคาที่ตั้งไว้ ให้ทำการซื้อ
+            logging.info(f"Price is below threshold, placing buy order at {current_price}")
+            quantity = balance / current_price  # ปรับจำนวนตามยอดคงเหลือ
+            buy_order = place_order(symbol, 'buy', current_price, quantity)
 
-            buy_price = current_price
-            start_time = time.time()
+            if buy_order:
+                buy_price = current_price
+                start_time = time.time()
+                while time.time() - start_time < max_wait_time:
+                    # ตรวจสอบว่าราคาเพิ่มขึ้น 1% จากราคาที่ซื้อ
+                    current_price = fetch_price(symbol)
+                    if current_price is None:
+                        continue
 
-            # Wait for sell condition
-            while True:
-                market_data = fetch_market_data(SYMBOL)
-                if not market_data:
+                    if current_price >= buy_price * PROFIT_TARGET:
+                        # หากราคาขึ้น 1% ให้ขาย
+                        logging.info(f"Price has increased by 1%, placing sell order at {current_price}")
+                        place_order(symbol, 'sell', current_price, quantity)
+                        break
+
+                    # รออีกนิดก่อนตรวจสอบราคาอีกครั้ง
                     time.sleep(1)
-                    continue
-                current_price = market_data.get("price")
 
-                # Check profit target
-                if current_price >= buy_price * PROFIT_TARGET:
-                    logging.info(f"Selling {SYMBOL} at {current_price} (profit target reached)")
-                    sell_order = execute_order("sell", SYMBOL, TRADE_AMOUNT)
-                    if sell_order:
-                        balance += (current_price - buy_price) * TRADE_AMOUNT
-                    break
+                else:
+                    # หากรอเกินเวลาที่กำหนด ให้บังคับขาย
+                    logging.info("Waiting time exceeded, forcing sell.")
+                    place_order(symbol, 'sell', current_price, quantity)
 
-                # Check max wait time
-                if time.time() - start_time > MAX_WAIT:
-                    logging.info(f"Selling {SYMBOL} at {current_price} (timeout)")
-                    sell_order = execute_order("sell", SYMBOL, TRADE_AMOUNT)
-                    if sell_order:
-                        balance += (current_price - buy_price) * TRADE_AMOUNT
-                    break
+        # รอให้ราคากลับมาต่ำกว่าราคาที่ซื้อเพื่อซื้ออีกครั้ง
+        logging.info(f"Waiting for price to drop to or below initial buy price {threshold}...")
+        while True:
+            current_price = fetch_price(symbol)
+            if current_price is None:
+                continue
+            if current_price <= threshold:
+                logging.info(f"Price dropped below initial buy price, placing buy order at {current_price}")
+                break
+            time.sleep(1)
 
-            logging.info(f"Balance: {balance}")
-        else:
-            logging.info(f"Waiting for price to drop below threshold ({THRESHOLD_PRICE})...")
-        time.sleep(5)
-
+# เริ่มต้นการใช้งาน
 if __name__ == "__main__":
-    auto_trade()
+    if login():
+        trade(SYMBOL, THRESHOLD_PRICE)
