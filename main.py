@@ -18,9 +18,9 @@ API_SECRET = os.getenv("API_SECRET")
 
 BASE_URL = "https://arkm.com/api"
 SYMBOL = "ETH_USDT"
-TRADE_AMOUNT = 0.02  # Amount to trade
-PROFIT_TARGET = 1.01  # Sell when price reaches 1% higher than the buy price
-WAIT_TIME = 10  # Force sell if waiting for this long in seconds
+TRADE_AMOUNT = 0.02  # จำนวนที่ต้องการซื้อขาย
+PROFIT_TARGET = 1.01  # ขายเมื่อราคาขึ้นไป 1% จากราคาซื้อ
+WAIT_TIME = 10  # หากรอเกินเวลานี้ให้ขาย
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -39,24 +39,22 @@ def generate_signature(api_key, api_secret, method, path, body=""):
     }
 
 def login_to_armk_api():
-    # Implement login mechanism, if needed (e.g., authenticate and get tokens)
     logging.info("Logged into ARMK API successfully.")
 
 def fetch_price(symbol):
-    path = f"/v1/market/{symbol}"
+    path = f"/market/{symbol}"  # ใช้ /market/ แทน /v1/market/
     headers = generate_signature(API_KEY, API_SECRET, 'GET', path)
     url = BASE_URL + path
     response = requests.get(url, headers=headers)
     data = response.json()
     if response.status_code == 200:
-        return float(data['data']['last_price'])  # Assuming the response contains this field
+        return float(data['data']['last_price'])  # ค่าราคาใน response
     else:
         logging.error(f"Error fetching data for {symbol}: {data}")
         return None
 
 def buy(symbol, amount):
-    # Send buy request (adjust as necessary for your API's endpoint and parameters)
-    path = "/v1/order"
+    path = "/order"  # เปลี่ยน path จาก /v1/order เป็น /order
     body = {
         "symbol": symbol,
         "amount": amount,
@@ -69,16 +67,15 @@ def buy(symbol, amount):
     data = response.json()
     if response.status_code == 200 and data.get('status') == 'success':
         logging.info(f"Bought {amount} {symbol} successfully at price {body['price']}")
-        return body['price']  # Return the buy price for further calculations
+        return body['price']  # คืนราคาซื้อเพื่อคำนวณต่อไป
     else:
         logging.error(f"Error placing buy order: {data}")
         return None
 
 def sell(symbol, amount, buy_price):
-    # Sell the asset when the price has increased by 1% or after 10 seconds
     current_price = fetch_price(symbol)
     if current_price and current_price >= buy_price * PROFIT_TARGET:
-        path = "/v1/order"
+        path = "/order"  # ใช้ /order แทน /v1/order
         body = {
             "symbol": symbol,
             "amount": amount,
@@ -100,7 +97,7 @@ def sell(symbol, amount, buy_price):
         return False
 
 def auto_trade():
-    balance = 1  # Set an initial balance (for example, you can fetch the actual balance from the API)
+    balance = 1  # ตั้งค่าเริ่มต้นสำหรับยอดคงเหลือ (สามารถดึงจาก API ได้จริง)
     initial_price = fetch_price(SYMBOL)
 
     while balance > 0:
@@ -110,12 +107,10 @@ def auto_trade():
 
         logging.info(f"Current price: {current_price}")
 
-        # If the price is lower than the initial price, attempt to buy
         if current_price < initial_price:
             logging.info(f"Price {current_price} is lower than initial price {initial_price}. Trying to buy.")
             buy_price = buy(SYMBOL, TRADE_AMOUNT)
             if buy_price:
-                # Wait for the price to reach the target
                 start_time = time.time()
                 while time.time() - start_time < WAIT_TIME:
                     if sell(SYMBOL, TRADE_AMOUNT, buy_price):
@@ -130,9 +125,9 @@ def auto_trade():
                     initial_price = fetch_price(SYMBOL)
         else:
             logging.info(f"Price {current_price} is not lower than initial price. Waiting for better conditions.")
-            time.sleep(5)  # Sleep before checking the price again
+            time.sleep(5)  # รอเวลา 5 วินาทีเพื่อเช็คราคาซ้ำ
 
-        time.sleep(1)  # Sleep before the next loop iteration
+        time.sleep(1)  # รอระหว่างการวนลูป
 
 if __name__ == "__main__":
     login_to_armk_api()
