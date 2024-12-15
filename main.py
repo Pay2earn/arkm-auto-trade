@@ -3,38 +3,23 @@ import hmac
 import hashlib
 import base64
 import requests
-import logging
 import os
 from dotenv import load_dotenv
+import logging
 
-# โหลดตัวแปรจากไฟล์ .env
+# Load environment variables
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-# ดึง API_KEY และ API_SECRET จาก .env
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 BASE_URL = "https://arkm.com/api"
 SYMBOL = "ETH_USDT"
+THRESHOLD_PRICE = 3500  # Example threshold
 TRADE_AMOUNT = 0.02
+PROFIT_TARGET = 1.01  # 1% profit
+MAX_WAIT = 120         # Maximum wait time in seconds for sell
 
-PROFIT_TARGET = 0.0004  # 0.03% profit target
-LOSS_CUTOFF = 0.001    # 0.1% stop-loss cutoff
-WAIT_TIME = 60         # Wait time in seconds if no sell occurs
-
-# ตรวจสอบค่าที่ดึงมาจาก .env
-if API_KEY is None or API_SECRET is None:
-    logging.error("Error: API_KEY or API_SECRET is not set in the .env file")
-else:
-    logging.info("Successfully loaded API_KEY and API_SECRET from .env")
-
-# Statistics tracking
-wins = 0
-losses = 0
-total_profit = 0
-total_loss = 0
-total_volume = 0
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 def generate_signature(api_key, api_secret, method, path, body=""):
     expiry = (int(time.time()) + 300) * 1000000
@@ -50,35 +35,95 @@ def generate_signature(api_key, api_secret, method, path, body=""):
         "Accept": "application/json"
     }
 
-def fetch_data_from_api(path):
-    logging.info(f"Preparing to fetch data from API endpoint: {path}")
-    method = "GET"
-    headers = generate_signature(API_KEY, API_SECRET, method, path)
-    url = f"{BASE_URL}/{path}"
+def fetch_market_data(symbol):
+    """Fetch market data for a specific symbol."""
+    path = f"/market_data/{symbol}"
+    headers = generate_signature(API_KEY, API_SECRET, "GET", path)
+    url = f"{BASE_URL}{path}"
     try:
-        logging.info(f"Sending request to {url}...")
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            logging.info("Data fetched successfully.")
             return response.json()
         else:
-            logging.error(f"Failed to fetch data: {response.status_code}, {response.text}")
+            logging.error(f"Failed to fetch market data: {response.status_code} - {response.text}")
             return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching data: {e}")
+    except Exception as e:
+        logging.error(f"Error fetching market data: {e}")
         return None
 
-def start_trading():
-    logging.info("Starting the trading bot...")
-    
-    # Fetch trade data
-    trade_data = fetch_data_from_api("trade_data")
-    if trade_data:
-        logging.info(f"Trade data: {trade_data}")
-        # Process trade logic here...
-        logging.info("Trading process completed.")
-    else:
-        logging.error("Unable to fetch trade data. Aborting trading.")
+def execute_order(order_type, symbol, amount):
+    """Execute buy or sell order."""
+    path = f"/orders"
+    body = {
+        "type": order_type,
+        "symbol": symbol,
+        "amount": amount
+    }
+    headers = generate_signature(API_KEY, API_SECRET, "POST", path, str(body))
+    url = f"{BASE_URL}{path}"
+    try:
+        response = requests.post(url, headers=headers, json=body)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logging.error(f"Order execution failed: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logging.error(f"Error executing order: {e}")
+        return None
+
+def auto_trade():
+    """Run the trading bot."""
+    balance = 1000  # Initial balance for trading
+    while balance > 0:
+        market_data = fetch_market_data(SYMBOL)
+        if not market_data:
+            logging.error("Failed to fetch market data, retrying...")
+            time.sleep(5)
+            continue
+
+        current_price = market_data.get("price")
+        logging.info(f"Current price of {SYMBOL}: {current_price}")
+
+        # Buy condition
+        if current_price <= THRESHOLD_PRICE:
+            logging.info(f"Buying {SYMBOL} at {current_price}")
+            buy_order = execute_order("buy", SYMBOL, TRADE_AMOUNT)
+            if not buy_order:
+                logging.error("Buy order failed.")
+                continue
+
+            buy_price = current_price
+            start_time = time.time()
+
+            # Wait for sell condition
+            while True:
+                market_data = fetch_market_data(SYMBOL)
+                if not market_data:
+                    time.sleep(1)
+                    continue
+                current_price = market_data.get("price")
+
+                # Check profit target
+                if current_price >= buy_price * PROFIT_TARGET:
+                    logging.info(f"Selling {SYMBOL} at {current_price} (profit target reached)")
+                    sell_order = execute_order("sell", SYMBOL, TRADE_AMOUNT)
+                    if sell_order:
+                        balance += (current_price - buy_price) * TRADE_AMOUNT
+                    break
+
+                # Check max wait time
+                if time.time() - start_time > MAX_WAIT:
+                    logging.info(f"Selling {SYMBOL} at {current_price} (timeout)")
+                    sell_order = execute_order("sell", SYMBOL, TRADE_AMOUNT)
+                    if sell_order:
+                        balance += (current_price - buy_price) * TRADE_AMOUNT
+                    break
+
+            logging.info(f"Balance: {balance}")
+        else:
+            logging.info(f"Waiting for price to drop below threshold ({THRESHOLD_PRICE})...")
+        time.sleep(5)
 
 if __name__ == "__main__":
-    start_trading()
+    auto_trade()
