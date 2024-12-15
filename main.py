@@ -15,7 +15,7 @@ API_KEY = os.getenv("API_KEY", "your-api-key")
 API_SECRET = os.getenv("API_SECRET", "your-api-secret")
 
 # ค่า BASE_URL สำหรับการเชื่อมต่อกับ API
-BASE_URL = "https://arkm.com"
+BASE_URL = "https://arkm.com/api"
 
 # ฟังก์ชันสำหรับสร้าง signature
 def generate_signature(api_key, api_secret, method, path, body=""):
